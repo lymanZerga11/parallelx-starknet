@@ -1,13 +1,25 @@
 %lang starknet
+# %builtins output pedersen range_check_ptr
 
 from starkware.cairo.common.registers import get_fp_and_pc
 from starkware.starknet.common.syscalls import get_contract_address
 from starkware.cairo.common.signature import verify_ecdsa_signature
+from starkware.cairo.common.math import unsigned_div_rem, assert_not_zero, assert_nn, assert_nn_le
 from starkware.cairo.common.cairo_builtins import HashBuiltin, SignatureBuiltin
 from starkware.starknet.common.syscalls import call_contract, get_caller_address, get_tx_signature
 from starkware.cairo.common.hash_state import (
     hash_init, hash_finalize, hash_update, hash_update_single
 )
+from starkware.starknet.common.syscalls import delegate_call
+
+
+###################
+# CONSTANTS
+###################
+
+# maximum 21 bytes int value
+const BYTES21 = 23384026197294446691258957323460528314494920687616
+
 
 ###################
 # STRUCTS
@@ -32,12 +44,22 @@ func current_nonce() -> (res: felt):
 end
 
 @storage_var
-func public_key() -> (res: felt):
+func default_public_key() -> (res: felt):
 end
 
 @storage_var
-func signature_validator() -> (res: felt):
+func public_keys(public_key : felt) -> (res : felt):
 end
+
+@storage_var
+func owner_count() -> (res: felt):
+end
+
+@storage_var
+func threshold() -> (res: felt):
+end
+
+
 
 
 ###################
@@ -66,9 +88,10 @@ func constructor{
         syscall_ptr : felt*, 
         pedersen_ptr : HashBuiltin*,
         range_check_ptr
-    }(_public_key: felt, _signature_validator: felt):
-    public_key.write(_public_key)
-    signature_validator.write(_signature_validator)
+    }(_public_key: felt):
+    default_public_key.write(_public_key)
+    public_keys.write(_public_key, 1)
+    owner_count.write(1)
     return()
 end
 
@@ -79,12 +102,12 @@ end
 ###################
 
 @view
-func get_public_key{
+func get_default_public_key{
         syscall_ptr : felt*,
         pedersen_ptr : HashBuiltin*,
         range_check_ptr
     }() -> (res: felt):
-    let (res) = public_key.read()
+    let (res) = default_public_key.read()
     return (res=res)
 end
 
@@ -95,16 +118,6 @@ func get_nonce{
         range_check_ptr
     }() -> (res: felt):
     let (res) = current_nonce.read()
-    return (res=res)
-end
-
-@view
-func get_signature_validator{
-        syscall_ptr : felt*, 
-        pedersen_ptr : HashBuiltin*,
-        range_check_ptr
-    }() -> (res: felt):
-    let (res) = signature_validator.read()
     return (res=res)
 end
 
@@ -135,28 +148,38 @@ func is_valid_signature{
         signature: felt*
     ) -> ():
 
-    let (_signature_validator) = signature_validator.read()
-    
-    if _signature_validator == 0:
-        default_signature_validation(
-            hash=hash, 
-            signature_len=signature_len, 
-            signature=signature)
-        
+    let (_default_public_key) = default_public_key.read()
+    let (_owner_count) = owner_count.read()
+    let (__fp__, _) = get_fp_and_pc()
+    assert_not_zero(signature_len)
+
+    if signature_len == 2:
+        assert _owner_count = 1
+        signature[2] = _default_public_key
+
+        validate_signatures(hash, signature_len+1, signature)
+
         tempvar syscall_ptr: felt* = syscall_ptr
         tempvar range_check_ptr = range_check_ptr
         tempvar pedersen_ptr: HashBuiltin* = pedersen_ptr
         tempvar ecdsa_ptr: SignatureBuiltin* = ecdsa_ptr
     else:
-        #call the sig validator
-        #TODO
-
+        # assert_nn(signature_len)
+        
+        let (q,r) = unsigned_div_rem(value=signature_len, div=3)
+        assert r = 0
+        let (res) = threshold.read()
+        assert_nn_le(res, q)
+        
+        validate_signatures(hash, signature_len, signature)
 
         tempvar syscall_ptr: felt* = syscall_ptr
         tempvar range_check_ptr = range_check_ptr
         tempvar pedersen_ptr: HashBuiltin* = pedersen_ptr
         tempvar ecdsa_ptr: SignatureBuiltin* = ecdsa_ptr
     end
+    
+
 
     return ()
 end
@@ -168,24 +191,59 @@ end
 ###################
 
 @external
-func set_public_key{
+func set_public_keys{
         syscall_ptr : felt*, 
         pedersen_ptr : HashBuiltin*,
         range_check_ptr
-    }(new_public_key: felt):
+    }(public_key: felt):
     assert_only_self()
-    public_key.write(new_public_key)
+    public_keys.write(public_key, 1)
+    let (_owner_count) = owner_count.read()
+    owner_count.write(_owner_count + 1)
     return ()
 end
 
 @external
-func set_signature_validator{
+func add_owner{
         syscall_ptr : felt*, 
         pedersen_ptr : HashBuiltin*,
         range_check_ptr
-    }(new_validator: felt):
+    }(public_key: felt):
     assert_only_self()
-    signature_validator.write(new_validator)
+
+    let (authorized_key) = public_keys.read(public_key=public_key)
+    assert authorized_key = 0
+
+    public_keys.write(public_key, 1)
+
+    let (_owner_count) = owner_count.read()
+    owner_count.write(_owner_count + 1)
+
+    return ()
+end
+
+
+
+@external
+func set_public_key{
+        syscall_ptr : felt*, 
+        pedersen_ptr : HashBuiltin*,
+        range_check_ptr
+    }(public_key: felt):
+    assert_only_self()
+    default_public_key.write(public_key)
+    return ()
+end
+
+
+@external
+func set_threshold{
+        syscall_ptr : felt*, 
+        pedersen_ptr : HashBuiltin*,
+        range_check_ptr
+    }(new_threshold: felt):
+    assert_only_self()
+    threshold.write(new_threshold)
     return ()
 end
 
@@ -194,7 +252,7 @@ end
 # EXTERNAL FUNCTIONS
 ###################
 
-@view
+@external
 func execute{
         syscall_ptr : felt*, 
         pedersen_ptr : HashBuiltin*,
@@ -206,7 +264,7 @@ func execute{
         calldata_len: felt,
         calldata: felt*,
         nonce: felt
-    ) -> (message_hash: felt):
+    ) -> (response_len: felt, response: felt*):
     alloc_locals
 
     let (__fp__, _) = get_fp_and_pc()
@@ -231,19 +289,18 @@ func execute{
 
     is_valid_signature(hash, signature_len, signature)
 
-    # # bump nonce
-    # current_nonce.write(_current_nonce + 1)
+    # bump nonce
+    current_nonce.write(_current_nonce + 1)
 
-    # # execute call
-    # let response = call_contract(
-    #     contract_address=message.to,
-    #     function_selector=message.selector,
-    #     calldata_size=message.calldata_size,
-    #     calldata=message.calldata
-    # )
+    # execute call
+    let response = call_contract(
+        contract_address=message.to,
+        function_selector=message.selector,
+        calldata_size=message.calldata_size,
+        calldata=message.calldata
+    )
 
-    # return (response_len=response.retdata_size, response=response.retdata)
-    return (message_hash=hash)
+    return (response_len=response.retdata_size, response=response.retdata)
 end
 
 
@@ -251,6 +308,55 @@ end
 ###################
 # INTERNAL FUNCTIONS
 ###################
+func validate_signatures{
+    syscall_ptr: felt*,
+    pedersen_ptr: HashBuiltin*,
+    ecdsa_ptr: SignatureBuiltin*,
+    range_check_ptr
+}(
+    hash: felt,
+    signature_len: felt,
+    signature: felt*) -> ():
+
+    let (__fp__, _) = get_fp_and_pc()
+
+    if signature_len == 0:
+        return ()
+    else:
+        let sig_r = signature[0]
+        let sig_s = signature[1]
+        let sig_key = signature[2]
+        
+        let (authorized_key) = public_keys.read(public_key=sig_key)
+
+        assert authorized_key = 1
+
+        let div_value = sig_key / BYTES21
+
+        if div_value == 0:
+            # validate eth signature
+            tempvar syscall_ptr: felt* = syscall_ptr
+            tempvar range_check_ptr = range_check_ptr
+            tempvar pedersen_ptr: HashBuiltin* = pedersen_ptr
+            tempvar ecdsa_ptr: SignatureBuiltin* = ecdsa_ptr
+        else:
+            verify_ecdsa_signature(
+                message=hash,
+                public_key=sig_key,
+                signature_r=sig_r,
+                signature_s=sig_s)
+
+            tempvar syscall_ptr: felt* = syscall_ptr
+            tempvar range_check_ptr = range_check_ptr
+            tempvar pedersen_ptr: HashBuiltin* = pedersen_ptr
+            tempvar ecdsa_ptr: SignatureBuiltin* = ecdsa_ptr
+        end
+        
+        return validate_signatures(hash, signature_len - 3, signature + 3)
+    end
+end  
+
+
 
 func default_signature_validation{
         syscall_ptr: felt*,
@@ -262,11 +368,15 @@ func default_signature_validation{
         signature_len: felt,
         signature: felt*
     ) -> ():
-    let (_public_key) = public_key.read()
+    let (_public_key) = default_public_key.read()
+    
+    let div_value = _public_key / BYTES21
 
-    # ethereum signature
-    if signature_len == 7675:
+    # ethereum signature (smaller than 21 bytes)
+    if div_value == 0:
         #verify eth signature
+        assert 1 = 0
+
         tempvar syscall_ptr: felt* = syscall_ptr
         tempvar range_check_ptr = range_check_ptr
         tempvar pedersen_ptr: HashBuiltin* = pedersen_ptr
