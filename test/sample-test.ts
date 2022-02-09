@@ -66,7 +66,7 @@ describe("Account Test", function () {
      await contract.invoke("execute", {
       to: BigInt(contract.address),
       selector: BigInt(ADD_OWNER_FUNCTION_SELECTOR),
-      calldata: [signer2.publicKeyHex],
+      calldata: [signer2.publicKeyFelt],
       nonce: 1
     }, multiSig.getFeltSignatures());
 
