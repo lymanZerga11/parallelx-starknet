@@ -4,8 +4,6 @@ import "@nomiclabs/hardhat-waffle";
 import "@shardlabs/starknet-hardhat-plugin";
 
 dotenv.config();
-
-
 const config: HardhatUserConfig = {
   cairo: {
     version: "0.7.0"
