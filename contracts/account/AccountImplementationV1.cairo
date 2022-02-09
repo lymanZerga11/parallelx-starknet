@@ -3,7 +3,7 @@
 
 from starkware.cairo.common.registers import get_fp_and_pc
 from starkware.starknet.common.syscalls import get_contract_address
-from starkware.cairo.common.signature import verify_ecdsa_signature
+from starkware.cairo.common.signature import verify_ecdsa_signature as verify_ecdsa_sn
 from starkware.cairo.common.math import unsigned_div_rem, assert_not_zero, assert_nn, assert_nn_le
 from starkware.cairo.common.cairo_builtins import HashBuiltin, SignatureBuiltin
 from starkware.starknet.common.syscalls import call_contract, get_caller_address, get_tx_signature
@@ -12,6 +12,8 @@ from starkware.cairo.common.hash_state import (
 )
 from starkware.starknet.common.syscalls import delegate_call
 
+from contracts.common.secp.secp import verify_ecdsa as verify_ecdsa_eth
+from contracts.common.secp.bigint import BigInt3
 
 ###################
 # CONSTANTS
@@ -20,6 +22,7 @@ from starkware.starknet.common.syscalls import delegate_call
 # maximum 21 bytes int value
 const BYTES21 = 23384026197294446691258957323460528314494920687616
 
+const BASE = 2 ** 86
 
 ###################
 # STRUCTS
@@ -49,6 +52,10 @@ end
 
 @storage_var
 func public_keys(public_key : felt) -> (res : felt):
+end
+
+@storage_var
+func public_key_list(index : felt) -> (public_key : felt):
 end
 
 @storage_var
@@ -89,9 +96,14 @@ func constructor{
         pedersen_ptr : HashBuiltin*,
         range_check_ptr
     }(_public_key: felt):
-    default_public_key.write(_public_key)
-    public_keys.write(_public_key, 1)
+    assert_not_zero(_public_key)
+
+    # default_public_key.write(_public_key)
+
+    public_keys.write(_public_key, 1) # index starts at 1 as 0 is preserved to check for nonexistent keys
+    public_key_list.write(1, _public_key)
     owner_count.write(1)
+    threshold.write(1)
     return()
 end
 
@@ -137,6 +149,23 @@ end
 ###################
 
 @view
+func split{range_check_ptr}(n: felt) -> (res_len: felt, res: felt*):
+    alloc_locals
+    local res_array : felt*
+
+    let (r, q) = unsigned_div_rem(n, BASE)
+    res_array[0] = q
+    let (r, q) = unsigned_div_rem(n, BASE)
+    res_array[1] = q
+    let (r, q) = unsigned_div_rem(n, BASE)
+    res_array[2] = q
+
+    return (res_len=3, res=res_array)
+end
+
+
+
+@view
 func is_valid_signature{
         syscall_ptr: felt*,
         pedersen_ptr: HashBuiltin*,
@@ -148,16 +177,18 @@ func is_valid_signature{
         signature: felt*
     ) -> ():
 
-    let (_default_public_key) = default_public_key.read()
+
     let (_owner_count) = owner_count.read()
+    let (_threshold) = threshold.read()
     let (__fp__, _) = get_fp_and_pc()
     assert_not_zero(signature_len)
 
     if signature_len == 2:
-        assert _owner_count = 1
+        assert _threshold = 1
+        let (_default_public_key) = public_key_list.read(1) # default_public_key.read()
         signature[2] = _default_public_key
 
-        validate_signatures(hash, signature_len+1, signature)
+        validate_signatures(hash, signature_len+1, signature, 1)
 
         tempvar syscall_ptr: felt* = syscall_ptr
         tempvar range_check_ptr = range_check_ptr
@@ -166,12 +197,12 @@ func is_valid_signature{
     else:
         # assert_nn(signature_len)
         
-        let (q,r) = unsigned_div_rem(value=signature_len, div=3)
-        assert r = 0
-        let (res) = threshold.read()
-        assert_nn_le(res, q)
+        # let (q,r) = unsigned_div_rem(value=signature_len, div=3)
+        # assert r = 0
+        # let (res) = threshold.read()
+        # assert_nn_le(res, q)
         
-        validate_signatures(hash, signature_len, signature)
+        validate_signatures(hash, signature_len, signature, _threshold)
 
         tempvar syscall_ptr: felt* = syscall_ptr
         tempvar range_check_ptr = range_check_ptr
@@ -197,9 +228,9 @@ func set_public_keys{
         range_check_ptr
     }(public_key: felt):
     assert_only_self()
-    public_keys.write(public_key, 1)
-    let (_owner_count) = owner_count.read()
-    owner_count.write(_owner_count + 1)
+    # public_keys.write(public_key, 1)
+    # let (_owner_count) = owner_count.read()
+    # owner_count.write(_owner_count + 1)
     return ()
 end
 
@@ -213,12 +244,13 @@ func add_owner{
 
     let (authorized_key) = public_keys.read(public_key=public_key)
     assert authorized_key = 0
-
-    public_keys.write(public_key, 1)
-
     let (_owner_count) = owner_count.read()
-    owner_count.write(_owner_count + 1)
+    tempvar new_owner_count = _owner_count + 1
 
+    public_keys.write(public_key, new_owner_count)
+    public_key_list.write(new_owner_count, public_key)
+
+    owner_count.write(new_owner_count)
     return ()
 end
 
@@ -316,31 +348,44 @@ func validate_signatures{
 }(
     hash: felt,
     signature_len: felt,
-    signature: felt*) -> ():
+    signature: felt*,
+    threshold: felt) -> ():
 
     let (__fp__, _) = get_fp_and_pc()
 
     if signature_len == 0:
+        assert threshold = 0
         return ()
     else:
+        if threshold == 0:
+            return ()
+        end
+        
         let sig_r = signature[0]
         let sig_s = signature[1]
         let sig_key = signature[2]
+
+        # let sig_type = signature[2]
         
         let (authorized_key) = public_keys.read(public_key=sig_key)
 
-        assert authorized_key = 1
+        assert_not_zero(authorized_key)
 
         let div_value = sig_key / BYTES21
 
         if div_value == 0:
+            
             # validate eth signature
+
+            # let sig_pub_x = signature[3]
+            # let sig_pub_y = d
+
             tempvar syscall_ptr: felt* = syscall_ptr
             tempvar range_check_ptr = range_check_ptr
             tempvar pedersen_ptr: HashBuiltin* = pedersen_ptr
             tempvar ecdsa_ptr: SignatureBuiltin* = ecdsa_ptr
         else:
-            verify_ecdsa_signature(
+            verify_ecdsa_sn(
                 message=hash,
                 public_key=sig_key,
                 signature_r=sig_r,
@@ -352,56 +397,8 @@ func validate_signatures{
             tempvar ecdsa_ptr: SignatureBuiltin* = ecdsa_ptr
         end
         
-        return validate_signatures(hash, signature_len - 3, signature + 3)
+        return validate_signatures(hash, signature_len - 3, signature + 3, threshold - 1)
     end
-end  
-
-
-
-func default_signature_validation{
-        syscall_ptr: felt*,
-        pedersen_ptr: HashBuiltin*,
-        ecdsa_ptr: SignatureBuiltin*,
-        range_check_ptr
-    }(
-        hash: felt,
-        signature_len: felt,
-        signature: felt*
-    ) -> ():
-    let (_public_key) = default_public_key.read()
-    
-    let div_value = _public_key / BYTES21
-
-    # ethereum signature (smaller than 21 bytes)
-    if div_value == 0:
-        #verify eth signature
-        assert 1 = 0
-
-        tempvar syscall_ptr: felt* = syscall_ptr
-        tempvar range_check_ptr = range_check_ptr
-        tempvar pedersen_ptr: HashBuiltin* = pedersen_ptr
-        tempvar ecdsa_ptr: SignatureBuiltin* = ecdsa_ptr
-    else:
-        # SN native signature
-        # This interface expects a signature pointer and length to make
-        # no assumption about signature validation schemes.
-        # But this implementation does, and it expects a (sig_r, sig_s) pair.
-        let sig_r = signature[0]
-        let sig_s = signature[1]
-
-        verify_ecdsa_signature(
-            message=hash,
-            public_key=_public_key,
-            signature_r=sig_r,
-            signature_s=sig_s)
-        
-        tempvar syscall_ptr: felt* = syscall_ptr
-        tempvar range_check_ptr = range_check_ptr
-        tempvar pedersen_ptr: HashBuiltin* = pedersen_ptr
-        tempvar ecdsa_ptr: SignatureBuiltin* = ecdsa_ptr
-    end
-
-    return ()
 end
 
 func hash_message{pedersen_ptr : HashBuiltin*}(message: Message*) -> (res: felt):
