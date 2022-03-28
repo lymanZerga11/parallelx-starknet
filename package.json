@@ -4,7 +4,8 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "npx hardhat test",
+    "build": "npx hardhat starknet-compile contracts"
   },
   "repository": {
     "type": "git",
@@ -16,9 +17,14 @@
   "bugs": {
     "url": "https://github.com/parallel-finance/parallelx-starknet/issues"
   },
+  "engines": {
+    "node": ">=12.22.4",
+    "npm": ">=7.21.1"
+  },
   "homepage": "https://github.com/parallel-finance/parallelx-starknet#readme",
   "devDependencies": {
     "@nomiclabs/hardhat-waffle": "^2.0.2",
+    "@nomiclabs/hardhat-ethers": "^2.0.0",
     "@shardlabs/starknet-hardhat-plugin": "latest",
     "@types/mocha": "^9.1.0",
     "chai": "^4.3.4",
