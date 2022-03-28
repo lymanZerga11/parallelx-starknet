@@ -2,6 +2,30 @@
 
 This is the Cairo implementaion of ParallelX. A platform that enables user groups to govern crypto asset account actions through an authorization configuration capable of providing granular level control over specific account actions.
 
+This implementation is considered a superset of OpenZeppelin standard Starknet account implementation. 
+
+
+## Current Supported Actions
+
+* Create a new signle owner account with 1 public key (behavior is identical to OpenZeppelin's)
+* Transfer ownership of a single owner account
+* Create new multi-sig account with n public keys (owners)
+* Add new public key to the account
+* Remove a public key from the account
+* Change account approval threshold
+
+
+## To be implemented
+
+* Social recovery mechanism
+* Spending rules
+* Executing transactions through approved modules
+* Utility modules:
+    * Bulk payment modules
+    * Stream payment modules
+    * DEFI integaration modules
+
+
 
 ## Requirements
 
