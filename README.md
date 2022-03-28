@@ -27,6 +27,15 @@ This implementation is considered a superset of OpenZeppelin standard Starknet a
 
 
 
+## Utility Classes
+
+We have introduced few utility classes/scripts that can facilitate testing and contract interactions. Take a look at the `test/utils` folder. You will find:
+
+* `MultiSignature.ts` this class can be used to build and represent a set of signatures that can be provided i nthe contract calls.
+*  `Transaction.ts` this can be used to build a transaction without worrying about how it should be formated.
+* `signer.ts` a class that represents a signer which can be used to sign any messages.
+* `SecpSignature.ts` this can be used to build and represent an SECP(ethereum) signature.
+
 ## Requirements
 
 * Node.js v12.22.4+
