@@ -1,4 +1,4 @@
-# ParallelX (Crypto Bank)
+# ParallelX (Multi Signature Treasury Management)
 
 This is the Cairo implementaion of ParallelX. A platform that enables user groups to govern crypto asset account actions through an authorization configuration capable of providing granular level control over specific account actions.
 
