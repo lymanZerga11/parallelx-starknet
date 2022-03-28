@@ -41,6 +41,6 @@
     "@toruslabs/starkware-crypto": "^1.0.0",
     "ethereum-cryptography": "^1.0.0",
     "ethereumjs-util": "^7.1.4",
-    "starknet": "^2.5.1"
+    "starknet": "^3.7.0"
   }
 }

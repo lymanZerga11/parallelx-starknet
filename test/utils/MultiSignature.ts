@@ -6,8 +6,12 @@ import { KeyPair, number, ec , hash, Signature} from "starknet";
 export default class MultiSignature {
     signatures: Signature = [];
 
-    addSignature(signature: Signature, publikKey: BigNumberish): void {
-        this.signatures.push(...signature, publikKey);
+
+    addSignature(signature: Signature, publikKey: any = undefined): void {
+        if (publikKey)
+            this.signatures.push(...signature, publikKey);
+        else
+            this.signatures.push(...signature);
     }
 
 
