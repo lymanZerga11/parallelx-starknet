@@ -34,7 +34,7 @@ export default class Transaction {
        
 
         if (signers.length == 1) {
-            signatures.addSignature(signers[0].signToFelt(messageHash));
+            signatures.addSignature(signers[0].sign(messageHash));
         } else {
 
             signers.forEach((e) => { 
